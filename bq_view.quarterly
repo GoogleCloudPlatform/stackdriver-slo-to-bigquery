@@ -1,0 +1,12 @@
+SELECT
+  service,
+  slo,
+  date,
+  FORMAT('%s-Q%d', FORMAT_DATE('%Y', date), EXTRACT(QUARTER from date)) AS quarter,
+  SUM(total * (1-target)) OVER (PARTITION BY service, slo, FORMAT('%s-Q%d', FORMAT_DATE('%Y', date), EXTRACT(QUARTER from date))) AS total_budget,
+  SUM(total-good) OVER (PARTITION BY service, slo, FORMAT('%s-Q%d', FORMAT_DATE('%Y', date), EXTRACT(QUARTER from date)) ORDER BY date) AS total_errors,
+  total,
+  good,
+  target
+FROM
+  `__DATA`

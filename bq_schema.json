@@ -1,0 +1,32 @@
+[
+    {
+        "name": "service",
+        "type": "STRING",
+        "mode": "REQUIRED"
+    },
+    {
+        "name": "slo",
+        "type": "STRING",
+        "mode": "REQUIRED"
+    },
+    {
+        "name": "date",
+        "type": "DATE",
+        "mode": "REQUIRED"
+    },
+    {
+        "name": "total",
+        "type": "INT64",
+        "mode": "REQUIRED"
+    },
+    {
+        "name": "good",
+        "type": "INT64",
+        "mode": "REQUIRED"
+    },
+    {
+        "name": "target",
+        "type": "FLOAT64",
+        "mode": "REQUIRED"
+    }
+]

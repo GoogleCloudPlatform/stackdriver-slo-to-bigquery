@@ -1,0 +1,12 @@
+SELECT
+  service,
+  slo,
+  date,
+  FORMAT_DATE('%Y-%m', date) AS month,
+  SUM(total * (1-target)) OVER (PARTITION BY service, slo, FORMAT_DATE('%Y-%m', date)) AS total_budget,
+  SUM(total-good) OVER (PARTITION BY service, slo, FORMAT_DATE('%Y-%m', date) ORDER BY date) AS total_errors,
+  total,
+  good,
+  target
+FROM
+  `__DATA`
