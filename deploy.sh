@@ -140,6 +140,11 @@ make_bigquery() {
                 --view "${sql}" --description "${desc}" "${view}"
         fi
     done
+
+    echo "Granting roles/bigquery.dataOwner to GCF service account..."
+    gcloud --project "${project}" projects add-iam-policy-binding "${project}" \
+        --member "serviceAccount:${project}@appspot.gserviceaccount.com" \
+        --role roles/bigquery.dataOwner > /dev/null
 }
 
 make_cloud_scheduler() {
