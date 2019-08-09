@@ -62,16 +62,12 @@ func syncAllServices(ctx context.Context, cfg *Config, sd clients.MetricClient, 
 			return err
 		}
 		for _, slo := range slos {
-			if slo.SLI.RequestBasedSLI != nil && slo.SLI.RequestBasedSLI.GoodTotalRatioSLI != nil {
-				res, err := newRecords(ctx, cfg, svc, slo, existing, sd)
-				if err != nil {
-					return err
-				}
-				rows = append(rows, res...)
-				log.Printf("Got %d new records for Service '%s' SLO '%s'", len(res), svc.HumanName(), slo.HumanName())
-			} else {
-				log.Printf("Service '%s' SLO '%s' is not based on a GoodTotalRatioSLI; skipping it", svc.HumanName(), slo.HumanName())
+			res, err := newRecords(ctx, cfg, svc, slo, existing, sd)
+			if err != nil {
+				return err
 			}
+			rows = append(rows, res...)
+			log.Printf("Got %d new records for Service '%s' SLO '%s'", len(res), svc.HumanName(), slo.HumanName())
 			if len(rows) >= bqBatchSize {
 				log.Printf("Flushing %d rows to BigQuery", len(rows))
 				if err := bq.Put(ctx, cfg.Dataset, tableName, rows); err != nil {
@@ -111,6 +107,7 @@ func newRecords(ctx context.Context, cfg *Config, svc *clients.Service, slo *cli
 		if err != nil {
 			return nil, err
 		}
+
 		log.Printf("SLO data for %s on %s: %d good, %d total", slo.HumanName(), date, row.Good, row.Total)
 		rows = append(rows, &row)
 	}
@@ -120,48 +117,9 @@ func newRecords(ctx context.Context, cfg *Config, svc *clients.Service, slo *cli
 // getGoodTotal returns two numbers corresponding to the cumulative count of good and total events for a given
 // SLO between the two timestamps.
 func getGoodTotal(ctx context.Context, cfg *Config, slo *clients.SLO, start, end time.Time, sd clients.MetricClient) (int64, int64, error) {
-	sli := slo.SLI.RequestBasedSLI.GoodTotalRatioSLI
-
-	if sli.Good != "" && sli.Total != "" {
-		good, err := getCounter(ctx, cfg, start, end, sli.Good, sd)
-		if err != nil {
-			return 0, 0, err
-		}
-		total, err := getCounter(ctx, cfg, start, end, sli.Total, sd)
-		if err != nil {
-			return 0, 0, err
-		}
-		return good, total, nil
-	} else if sli.Good != "" && sli.Bad != "" {
-		good, err := getCounter(ctx, cfg, start, end, sli.Good, sd)
-		if err != nil {
-			return 0, 0, err
-		}
-		bad, err := getCounter(ctx, cfg, start, end, sli.Bad, sd)
-		if err != nil {
-			return 0, 0, err
-		}
-		return good, good + bad, nil
-	} else if sli.Bad != "" && sli.Total != "" {
-		bad, err := getCounter(ctx, cfg, start, end, sli.Bad, sd)
-		if err != nil {
-			return 0, 0, err
-		}
-		total, err := getCounter(ctx, cfg, start, end, sli.Total, sd)
-		if err != nil {
-			return 0, 0, err
-		}
-		return total - bad, total, nil
-	}
-	return 0, 0, fmt.Errorf("expected 2 out of 3 filter expressions (good, bad, total) to be defined")
-}
-
-// getCounter returns the total sum of a Stackdriver cumulative metric (identified by the filter expression) between
-// two timestamps.
-func getCounter(ctx context.Context, cfg *Config, start, end time.Time, filter string, sd clients.MetricClient) (int64, error) {
 	req := &monitoringpb.ListTimeSeriesRequest{
 		Name:   fmt.Sprintf("projects/%s", cfg.Project),
-		Filter: filter,
+		Filter: fmt.Sprintf(`select_slo_counts("%s")`, slo.Name),
 		Interval: &monitoringpb.TimeInterval{
 			// `start` and `end` are guaranteed to be aligned to a second (since they come from
 			// daysAgoMidnightTimestamp()), so there is no need to fill `Timestamp.Nanos`.
@@ -174,33 +132,40 @@ func getCounter(ctx context.Context, cfg *Config, start, end time.Time, filter s
 			AlignmentPeriod: &duration.Duration{
 				Seconds: end.Unix() - start.Unix(),
 			},
-			CrossSeriesReducer: monitoringpb.Aggregation_REDUCE_SUM,
-			PerSeriesAligner:   monitoringpb.Aggregation_ALIGN_DELTA,
+			PerSeriesAligner: monitoringpb.Aggregation_ALIGN_DELTA,
 		},
 	}
 
 	series, err := sd.ListTimeSeries(ctx, req)
 	if err != nil {
-		return 0, err
+		return 0, 0, fmt.Errorf("ListTimeSeries (%v) error: %v", req, err)
 	}
 
 	if len(series) == 0 {
-		log.Printf("Got 0 time series while querying '%s'", filter)
-		return 0, nil
+		log.Printf("Got 0 time series while querying '%s'", slo.Name)
+		return 0, 0, nil
+	} else if len(series) != 2 {
+		return 0, 0, fmt.Errorf("expected to get 2 time series while querying %v; got %v", slo, series)
 	}
 
-	if len(series) != 1 {
-		return 0, fmt.Errorf("expected to get 1 time series while querying '%s'; got %q", filter, series)
+	var good, total float64
+	for _, s := range series {
+		if len(s.Points) != 1 {
+			return 0, 0, fmt.Errorf("expected to get 1 point in %v; got %v", s.GetMetric(), s.Points)
+		}
+		if s.ValueType != metricpb.MetricDescriptor_DOUBLE {
+			return 0, 0, fmt.Errorf("unexpected value type in %v: %v", s.GetMetric(), s.ValueType)
+		}
+		value := s.Points[0].GetValue().GetDoubleValue()
+		labels := s.GetMetric().GetLabels()
+		if labels["event_type"] == "bad" {
+			total += value
+		} else if labels["event_type"] == "good" {
+			total += value
+			good += value
+		} else {
+			return 0, 0, fmt.Errorf("unexpected value of 'event_type' label in %v: %v", s.GetMetric(), labels["event_type"])
+		}
 	}
-
-	if len(series[0].Points) != 1 {
-		return 0, fmt.Errorf("expected to get 1 point while querying '%s'; got %q", filter, series[0].Points)
-	}
-
-	if series[0].ValueType == metricpb.MetricDescriptor_DOUBLE {
-		return int64(series[0].Points[0].GetValue().GetDoubleValue()), nil
-	} else if series[0].ValueType == metricpb.MetricDescriptor_INT64 {
-		return series[0].Points[0].GetValue().GetInt64Value(), nil
-	}
-	return 0, fmt.Errorf("unexpected value type: %v", series[0].ValueType)
+	return int64(good), int64(total), nil
 }

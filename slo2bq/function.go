@@ -20,9 +20,9 @@ import (
 	"encoding/json"
 	"log"
 	"slo2bq/clients"
+	"time"
 
 	"golang.org/x/oauth2/google"
-	"time"
 )
 
 // BigQuery table name for the raw data.

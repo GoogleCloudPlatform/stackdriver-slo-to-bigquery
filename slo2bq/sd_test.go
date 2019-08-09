@@ -73,26 +73,28 @@ func TestSyncAllServices(t *testing.T) {
 	sloc := mocks.NewMockSLOClient(mockCtrl)
 	sloc.EXPECT().Services().Return([]*clients.Service{&clients.Service{Name: "s1", DisplayName: "svc1"}}, nil)
 	sloc.EXPECT().SLOs(gomock.Any()).Return([]*clients.SLO{
-		&clients.SLO{Name: "s1", DisplayName: "slo1", Goal: 0.99, SLI: &clients.SLI{
-			RequestBasedSLI: &clients.RequestBasedSLI{GoodTotalRatioSLI: &clients.GoodTotalRatioSLI{Good: "good1", Total: "total1"}},
-		}},
-		&clients.SLO{Name: "s1", DisplayName: "slo2", Goal: 0.5, SLI: &clients.SLI{
-			RequestBasedSLI: &clients.RequestBasedSLI{GoodTotalRatioSLI: &clients.GoodTotalRatioSLI{Good: "good2", Bad: "bad2"}},
-		}},
+		&clients.SLO{Name: "s1", DisplayName: "slo1", Goal: 0.99},
+		&clients.SLO{Name: "s1", DisplayName: "slo2", Goal: 0.5},
 	}, nil)
 
 	sd := mocks.NewMockMetricClient(mockCtrl)
-	// This will be called 4 times: good & total for slo1/2015-05-09, good & bad for slo2/2015-05-08.
-	sd.EXPECT().ListTimeSeries(gomock.Any(), gomock.Any()).Times(4).Return([]*monitoringpb.TimeSeries{
-		&monitoringpb.TimeSeries{ValueType: metricpb.MetricDescriptor_INT64, Points: []*monitoringpb.Point{
-			&monitoringpb.Point{Value: &monitoringpb.TypedValue{Value: &monitoringpb.TypedValue_Int64Value{Int64Value: 11}}}}},
+	// This will be called 2 times: once for slo1/2015-05-09, second time for slo2/2015-05-08.
+	sd.EXPECT().ListTimeSeries(gomock.Any(), gomock.Any()).Times(2).Return([]*monitoringpb.TimeSeries{
+		&monitoringpb.TimeSeries{
+			Metric:    &metricpb.Metric{Labels: map[string]string{"event_type": "good"}},
+			ValueType: metricpb.MetricDescriptor_DOUBLE, Points: []*monitoringpb.Point{
+				&monitoringpb.Point{Value: &monitoringpb.TypedValue{Value: &monitoringpb.TypedValue_DoubleValue{DoubleValue: 100}}}}},
+		&monitoringpb.TimeSeries{
+			Metric:    &metricpb.Metric{Labels: map[string]string{"event_type": "bad"}},
+			ValueType: metricpb.MetricDescriptor_DOUBLE, Points: []*monitoringpb.Point{
+				&monitoringpb.Point{Value: &monitoringpb.TypedValue{Value: &monitoringpb.TypedValue_DoubleValue{DoubleValue: 11}}}}},
 	}, nil)
 
 	bq.EXPECT().Put(gomock.Any(), "datasetname", "data", []*clients.BQRow{
-		&clients.BQRow{Service: "svc1", SLO: "slo1", Date: "2015-05-09", Target: 0.99, Good: 11, Total: 11},
+		&clients.BQRow{Service: "svc1", SLO: "slo1", Date: "2015-05-09", Target: 0.99, Good: 100, Total: 111},
 	})
 	bq.EXPECT().Put(gomock.Any(), "datasetname", "data", []*clients.BQRow{
-		&clients.BQRow{Service: "svc1", SLO: "slo2", Date: "2015-05-08", Target: 0.5, Good: 11, Total: 22},
+		&clients.BQRow{Service: "svc1", SLO: "slo2", Date: "2015-05-08", Target: 0.5, Good: 100, Total: 111},
 	})
 	bq.EXPECT().Put(gomock.Any(), "datasetname", "data", nil) // final Put with no rows.
 
@@ -129,20 +131,24 @@ func TestSyncAllServicesErrors(t *testing.T) {
 			sloc := mocks.NewMockSLOClient(mockCtrl)
 			sloc.EXPECT().Services().AnyTimes().Return([]*clients.Service{&clients.Service{Name: "s1", DisplayName: "svc1"}}, tt.servicesErr)
 			sloc.EXPECT().SLOs(gomock.Any()).AnyTimes().Return([]*clients.SLO{
-				&clients.SLO{Name: "s1", DisplayName: "slo1", Goal: 0.99, SLI: &clients.SLI{
-					RequestBasedSLI: &clients.RequestBasedSLI{GoodTotalRatioSLI: &clients.GoodTotalRatioSLI{Good: "good1", Total: "total1"}},
-				}}}, tt.slosErr)
+				&clients.SLO{Name: "s1", DisplayName: "slo1", Goal: 0.99}}, tt.slosErr)
 
 			sd := mocks.NewMockMetricClient(mockCtrl)
 			sd.EXPECT().ListTimeSeries(gomock.Any(), gomock.Any()).AnyTimes().Return([]*monitoringpb.TimeSeries{
-				&monitoringpb.TimeSeries{ValueType: metricpb.MetricDescriptor_INT64, Points: []*monitoringpb.Point{
-					&monitoringpb.Point{Value: &monitoringpb.TypedValue{Value: &monitoringpb.TypedValue_Int64Value{Int64Value: 11}}}}},
+				&monitoringpb.TimeSeries{
+					Metric:    &metricpb.Metric{Labels: map[string]string{"event_type": "good"}},
+					ValueType: metricpb.MetricDescriptor_DOUBLE, Points: []*monitoringpb.Point{
+						&monitoringpb.Point{Value: &monitoringpb.TypedValue{Value: &monitoringpb.TypedValue_DoubleValue{DoubleValue: 100}}}}},
+				&monitoringpb.TimeSeries{
+					Metric:    &metricpb.Metric{Labels: map[string]string{"event_type": "bad"}},
+					ValueType: metricpb.MetricDescriptor_DOUBLE, Points: []*monitoringpb.Point{
+						&monitoringpb.Point{Value: &monitoringpb.TypedValue{Value: &monitoringpb.TypedValue_DoubleValue{DoubleValue: 11}}}}},
 			}, tt.sdErr)
 
 			cfg := &Config{Project: "project", Dataset: "datasetname", TimeZone: "Europe/London"}
 			err := syncAllServices(context.Background(), cfg, sd, sloc, bq)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Errorf("LatestTimestamp() expected error to contain '%s'; got %v", tt.wantErr, err)
+				t.Errorf("syncAllServices() expected error to contain '%s'; got %v", tt.wantErr, err)
 			}
 		})
 	}
