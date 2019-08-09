@@ -64,7 +64,6 @@ type servicesResponse struct {
 type SLO struct {
 	Name        string  `json:"name"`
 	DisplayName string  `json:"displayName"`
-	SLI         *SLI    `json:"serviceLevelIndicator"`
 	Goal        float64 `json:"goal"`
 }
 
@@ -76,24 +75,6 @@ func (s *SLO) HumanName() string {
 	// Name is like 'projects/$project/services/$service/serviceLevelObjectives/$slo'.
 	elements := strings.Split(s.Name, "/")
 	return elements[5]
-}
-
-// SLI is a Service Level Indicator.
-type SLI struct {
-	RequestBasedSLI *RequestBasedSLI `json:"requestBased"`
-	// NOTE: other types of SLIs are not implemented by this client yet.
-}
-
-// RequestBasedSLI is an SLI based on a request counter.
-type RequestBasedSLI struct {
-	GoodTotalRatioSLI *GoodTotalRatioSLI `json:"goodTotalRatio"`
-}
-
-// GoodTotalRatioSLI is an SLI based on counters of good & bad requests.
-type GoodTotalRatioSLI struct {
-	Good  string `json:"goodServiceFilter"`
-	Bad   string `json:"badServiceFilter"`
-	Total string `json:"totalServiceFilter"`
 }
 
 type slosResponse struct {
