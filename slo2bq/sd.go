@@ -33,6 +33,9 @@ var timeNow = time.Now
 // days in the past.
 var backfillDays = 40
 
+// bqBatchSize is the number of BigQuery rows we will write at a time.
+var bqBatchSize = 100
+
 // daysAgoMidnightTimestamp returns a timestamp that corresponds to midnight of the day
 // that was daysAgo days ago in a given location.
 func daysAgoMidnightTimestamp(now time.Time, loc *time.Location, daysAgo int) time.Time {
@@ -68,6 +71,13 @@ func syncAllServices(ctx context.Context, cfg *Config, sd clients.MetricClient, 
 				log.Printf("Got %d new records for Service '%s' SLO '%s'", len(res), svc.HumanName(), slo.HumanName())
 			} else {
 				log.Printf("Service '%s' SLO '%s' is not based on a GoodTotalRatioSLI; skipping it", svc.HumanName(), slo.HumanName())
+			}
+			if len(rows) >= bqBatchSize {
+				log.Printf("Flushing %d rows to BigQuery", len(rows))
+				if err := bq.Put(ctx, cfg.Dataset, tableName, rows); err != nil {
+					return err
+				}
+				rows = nil
 			}
 		}
 	}
