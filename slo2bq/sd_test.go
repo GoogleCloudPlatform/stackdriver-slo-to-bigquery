@@ -60,6 +60,7 @@ func TestDaysAgoMidnightTimestamp(t *testing.T) {
 func TestSyncAllServices(t *testing.T) {
 	timeNow = func() time.Time { return time.Date(2015, time.May, 10, 15, 0, 0, 0, time.UTC) }
 	backfillDays = 2
+	bqBatchSize = 1
 	defer func() { timeNow = time.Now }()
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
@@ -89,8 +90,11 @@ func TestSyncAllServices(t *testing.T) {
 
 	bq.EXPECT().Put(gomock.Any(), "datasetname", "data", []*clients.BQRow{
 		&clients.BQRow{Service: "svc1", SLO: "slo1", Date: "2015-05-09", Target: 0.99, Good: 11, Total: 11},
+	})
+	bq.EXPECT().Put(gomock.Any(), "datasetname", "data", []*clients.BQRow{
 		&clients.BQRow{Service: "svc1", SLO: "slo2", Date: "2015-05-08", Target: 0.5, Good: 11, Total: 22},
 	})
+	bq.EXPECT().Put(gomock.Any(), "datasetname", "data", nil) // final Put with no rows.
 
 	cfg := &Config{Project: "project", Dataset: "datasetname", TimeZone: "Europe/London"}
 
@@ -98,6 +102,7 @@ func TestSyncAllServices(t *testing.T) {
 		t.Errorf("syncAllServices() unexpected error: %v", err)
 	}
 }
+
 func TestSyncAllServicesErrors(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
