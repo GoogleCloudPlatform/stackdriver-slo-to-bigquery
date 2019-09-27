@@ -19,6 +19,9 @@ set -e -u -o pipefail
 # Default name of the BigQuery dataset.
 dataset="slo_reporting"
 
+# Default schedule.
+schedule="30 */8 * * *"
+
 # Name of the Pubsub topic that will trigger the GCF function.
 readonly TOPIC="slo2bq-trigger"
 
@@ -32,7 +35,7 @@ raise() {
 
 usage() {
     echo "
-$0 [--dataset <dataset>] --project <project_name> --timezone <timezone>
+$0 [--schedule <schedule>] [--dataset <dataset>] --project <project_name> --timezone <timezone>
 
 This script configures GCP resources nessesary for SLO Reporting based on
 data in the Stackdriver Service Monitoring. The following resources will
@@ -54,6 +57,9 @@ be created:
 
 --dataset <dataset>
   BigQuery dataset to use. The default is '$dataset'.
+
+--schedule <schedule>
+  Cron-style schedule definition for the GCF function. The default is '$schedule'.
 " >&2
     exit 2
 }
@@ -76,6 +82,11 @@ parse_args() {
             (--dataset)
                 [[ -n "${1:-}" ]] || raise "--dataset requires a value"
                 dataset="$1"
+                shift
+                ;;
+            (--schedule)
+                [[ -n "${1:-}" ]] || raise "--schedule requires a value"
+                schedule="$1"
                 shift
                 ;;
             (*)
@@ -157,7 +168,7 @@ make_cloud_scheduler() {
     local message='{"Project":"'${project}'","Dataset":"'${dataset}'",
         "TimeZone":"'${timezone}'"}'
     gcloud --project "${project}" beta scheduler jobs create \
-        pubsub ${CRONJOB} --schedule "30 */8 * * *" \
+        pubsub ${CRONJOB} --schedule "${schedule}" \
         --description "Trigger slo2bq function" \
         --topic "projects/${project}/topics/${TOPIC}" \
         --message-body "${message}"
